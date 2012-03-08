@@ -1,4 +1,3 @@
-
 #ifndef PYUV_H
 #define PYUV_H
 
@@ -47,20 +46,23 @@ typedef int Bool;
 
 #define UNUSED_ARG(arg)  (void)arg
 
+
+#define UV_LOOP(x) x->loop->uv_loop
+
 #if defined(__MINGW32__) || defined(_MSC_VER)
     #define PYUV_WINDOWS
 #endif
 
+#if defined(_MSC_VER)
 #define ASSERT(x)                                                           \
     do {                                                                    \
         if (!(x)) {                                                         \
             fprintf (stderr, "%s:%u: %s: Assertion `" #x "' failed.\n",     \
-                     __FILE__, __LINE__, __func__);                         \
+                     __FILE__, __LINE__, __FUNCTION__);                     \
             abort();                                                        \
         }                                                                   \
     } while(0)                                                              \
 
-#define UV_LOOP(x) (x)->loop->uv_loop
 
 #define UV_HANDLE(x) ((Handle *)x)->uv_handle
 
@@ -86,6 +88,17 @@ typedef int Bool;
         }                                                                           \
     } while(0)                                                                      \
 
+#else
+#define ASSERT(x)                                                           \
+    do {                                                                    \
+        if (!(x)) {                                                         \
+            fprintf (stderr, "%s:%u: %s: Assertion `" #x "' failed.\n",     \
+                     __FILE__, __LINE__, __func__);                         \
+            abort();                                                        \
+        }                                                                   \
+    } while(0)                                                              \
+
+#endif
 
 /* Python types definitions */
 
