@@ -10,11 +10,12 @@ Version 0.6.0
  - Refactored ThreadPool
  - Refactored DNS functions to return values like the Pyhton standard
    library
- - Reordered arguments in several functions of the DNS module 
+ - Reordered arguments in several functions of the DNS module
  - Fixed several reference leaks
  - Fixed crash when doing CNAME queries
- - Map several new error codes (ENOTEMPTY, EPERM, ELOOP, EXDEV)
- - Raised libuv revision to db413f3
+ - Fixed compilation on Windows 7
+ - Map several new error codes (ENOTEMPTY, EPERM, ELOOP, EXDEV, ENOSPC)
+ - Raised libuv revision to 31ff986
  - Updated documentation
 
 Version 0.5.0

@@ -50,7 +50,7 @@ class libuv_build_ext(build_ext):
     libuv_dir      = os.path.join('deps', 'libuv')
     libuv_repo     = 'https://github.com/joyent/libuv.git'
     libuv_branch   = 'master'
-    libuv_revision = '379ca42'
+    libuv_revision = '1ab8f5a'
     libuv_patches  = ['patches/c-ares_naptr_support.patch','patches/common.gypi.patch','patches/uv.gyp.patch']
 
     user_options = build_ext.user_options
@@ -67,8 +67,10 @@ class libuv_build_ext(build_ext):
         self.libuv_force_fetch = 0
 
     def build_extensions(self):
-        if self.libuv_force_fetch or self.libuv_clean_compile:
-            self.force = 1
+        if self.compiler.compiler_type == 'mingw32':
+            # Dirty hack to avoid linking with more than one C runtime when using MinGW
+            self.compiler.dll_libraries = [lib for lib in self.compiler.dll_libraries if not lib.startswith('msvcr')]
+        self.force = self.libuv_force_fetch or self.libuv_clean_compile
         self.get_libuv()
         build_ext.build_extensions(self)
 
