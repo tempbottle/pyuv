@@ -83,7 +83,6 @@ class libuv_build_ext(build_ext):
         elif sys.platform == 'darwin':
             self.extensions[0].extra_link_args = ['-framework', 'CoreServices']
         elif sys.platform == 'win32':
-            self.library_dirs.append(os.path.join(self.libuv_dir, 'Release', 'lib'))
             self.libraries.append('iphlpapi')
             self.libraries.append('psapi')
             self.libraries.append('ws2_32')
@@ -91,7 +90,6 @@ class libuv_build_ext(build_ext):
 
     def get_libuv(self):
         #self.debug_mode =  bool(self.debug) or hasattr(sys, 'gettotalrefcount')
-        self.cc = self.compiler.compiler_type
         
         def download_libuv():
             log.info('Downloading libuv...')
@@ -106,10 +104,10 @@ class libuv_build_ext(build_ext):
             cflags = '-fPIC'
             env = os.environ.copy()
             env['CFLAGS'] = ' '.join(x for x in (cflags, env.get('CFLAGS', None)) if x)
-            if sys.platform=='win32' and self.cc=='msvc':
+            if sys.platform=='win32' and self.compiler.compiler_type=='msvc':
                 log.info('build libuv on win32...')
-                os.system(self.libuv_dir + r"\vcbuild.bat release")
-                #exec_process(['cmd.exe','/C','vcbuild.bat release'], cwd=self.libuv_dir, env=env)
+                exec_process(['cmd.exe','/C','vcbuild.bat release'], cwd=self.libuv_dir, env=env)
+                shutil.move(os.path.join(self.libuv_dir, 'Release', 'lib', 'uv.lib'), os.path.join(self.libuv_dir, 'uv.lib'))
             else:
                 log.info('Building libuv...')
                 exec_process(['make', 'uv.a'], cwd=self.libuv_dir, env=env)
@@ -122,13 +120,14 @@ class libuv_build_ext(build_ext):
             build_libuv()
         else:
             if self.libuv_clean_compile:
-                if sys.platform=="win32" and self.cc=="msvc":
-                    os.system('rd /s /q' + os.path.join(self.libuv_dir, 'Release'))
+                if sys.platform=='win32' and self.compiler.compiler_type=='msvc':
+                    exec_process(['cmd.exe','/C','vcbuild.bat clean'], cwd=self.libuv_dir, env=env)
+                    os.remove(os.path.join(self.libuv_dir, 'uv.lib'))
                 else:
                     exec_process(['make', 'clean'], cwd=self.libuv_dir)
                     
-            if sys.platform=="win32" and self.cc=="msvc":
-                if not os.path.exists(os.path.join(self.libuv_dir, 'Release', 'lib', 'uv.lib')):
+            if sys.platform=='win32' and self.compiler.compiler_type=='msvc':
+                if not os.path.exists(os.path.join(self.libuv_dir, 'uv.lib')):
                     log.info('libuv needs to be compiled.')
                     build_libuv()
                 else:
@@ -148,7 +147,6 @@ class libuv_sdist(sdist):
     libuv_patches  = libuv_build_ext.libuv_patches
 
     def initialize_options(self):
-        log.info('libuv_sdist.initialize_options')
         sdist.initialize_options(self)
         rmtree('deps')
         makedirs(self.libuv_dir)
