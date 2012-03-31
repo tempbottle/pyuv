@@ -54,15 +54,8 @@ typedef int Bool;
 #endif
 
 #if defined(_MSC_VER)
-#define ASSERT(x)                                                           \
-    do {                                                                    \
-        if (!(x)) {                                                         \
-            fprintf (stderr, "%s:%u: %s: Assertion `" #x "' failed.\n",     \
-                     __FILE__, __LINE__, __FUNCTION__);                     \
-            abort();                                                        \
-        }                                                                   \
-    } while(0)                                                              \
-
+#define __func__ __FUNCTION__
+#endif 
 
 #define UV_HANDLE(x) ((Handle *)x)->uv_handle
 
@@ -93,12 +86,11 @@ typedef int Bool;
     do {                                                                    \
         if (!(x)) {                                                         \
             fprintf (stderr, "%s:%u: %s: Assertion `" #x "' failed.\n",     \
-                     __FILE__, __LINE__, __func__);                         \
+                     __FILE__, __LINE__, __func__);                     \
             abort();                                                        \
         }                                                                   \
     } while(0)                                                              \
 
-#endif
 
 /* Python types definitions */
 
