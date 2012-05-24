@@ -1,6 +1,7 @@
 
 static PyObject* PyExc_UVError;
 
+
 static PyObject *
 Util_func_hrtime(PyObject *obj)
 {
@@ -185,25 +186,24 @@ static Bool setup_args_called = False;
 static void
 setup_args(void)
 {
-    int argc;
+    int r, argc;
     char **argv;
     void (*Py_GetArgcArgv)(int *argc, char ***argv);
     uv_lib_t dlmain;
-    uv_err_t r;
 
     r = uv_dlopen(NULL, &dlmain);
-    if (r.code != UV_OK) {
+    if (r != 0) {
         return;
     }
 
-    r = uv_dlsym(dlmain, "Py_GetArgcArgv", (void **)&Py_GetArgcArgv);
-    if (r.code != UV_OK) {
-        uv_dlclose(dlmain);
+    r = uv_dlsym(&dlmain, "Py_GetArgcArgv", (void **)&Py_GetArgcArgv);
+    if (r != 0) {
+        uv_dlclose(&dlmain);
         return;
     }
 
     Py_GetArgcArgv(&argc, &argv);
-    uv_dlclose(dlmain);
+    uv_dlclose(&dlmain);
 
     uv_setup_args(argc, argv);
     setup_args_called = True;

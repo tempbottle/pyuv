@@ -374,9 +374,17 @@
 
         :py:class:`Loop` object where this handle runs.
 
-    .. py:attribute:: data
+    .. py:attribute:: filename
 
-        Any Python object attached to this handle.
+        *Read only*
+
+        Filename being monitored.
+
+    .. py:attribute:: active
+
+        *Read only*
+
+        Indicates if this handle is active.
 
 
 Module constants
@@ -386,5 +394,4 @@ Module constants
 .. py:data:: pyuv.fs.UV_CHANGE
 .. py:data:: pyuv.fs.UV_FS_EVENT_WATCH_ENTRY
 .. py:data:: pyuv.fs.UV_FS_EVENT_STAT
-
 

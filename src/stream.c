@@ -1,5 +1,5 @@
 
-static PyObject* PyExc_IOStreamError;
+static PyObject* PyExc_StreamError;
 
 
 typedef struct {
@@ -25,46 +25,6 @@ on_iostream_alloc(uv_stream_t* handle, size_t suggested_size)
 }
 
 
-static void
-on_iostream_close(uv_handle_t *handle)
-{
-    PyGILState_STATE gstate = PyGILState_Ensure();
-    IOStream *self;
-    PyObject *result;
-    ASSERT(handle);
-
-    self = (IOStream *)handle->data;
-    ASSERT(self);
-
-    if (self->on_close_cb != Py_None) {
-        result = PyObject_CallFunctionObjArgs(self->on_close_cb, self, NULL);
-        if (result == NULL) {
-            PyErr_WriteUnraisable(self->on_close_cb);
-        }
-        Py_XDECREF(result);
-    }
-
-    handle->data = NULL;
-    PyMem_Free(handle);
-
-    /* Refcount was increased in func_close */
-    Py_DECREF(self);
-
-    PyGILState_Release(gstate);
-}
-
-
-static void
-on_iostream_dealloc_close(uv_handle_t *handle)
-{
-    PyGILState_STATE gstate = PyGILState_Ensure();
-    ASSERT(handle);
-    handle->data = NULL;
-    PyMem_Free(handle);
-    PyGILState_Release(gstate);
-}
-
-
 /*
  * Called when all pending write requests have been sent, write direction has been closed.
  */
@@ -74,11 +34,11 @@ on_iostream_shutdown(uv_shutdown_t* req, int status)
     PyGILState_STATE gstate = PyGILState_Ensure();
     iostream_req_data_t* req_data;
     uv_err_t err;
-    IOStream *self;
+    Stream *self;
     PyObject *callback, *result, *py_errorno;
 
     req_data = (iostream_req_data_t *)req->data;
-    self = (IOStream *)req_data->obj;
+    self = (Stream *)req_data->obj;
     callback = req_data->callback;
 
     ASSERT(self);
@@ -87,7 +47,7 @@ on_iostream_shutdown(uv_shutdown_t* req, int status)
 
     if (callback != Py_None) {
         if (status < 0) {
-            err = uv_last_error(UV_LOOP(self));
+            err = uv_last_error(UV_HANDLE_LOOP(self));
             py_errorno = PyInt_FromLong((long)err.code);
         } else {
             py_errorno = Py_None;
@@ -115,11 +75,11 @@ on_iostream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     uv_err_t err;
-    IOStream *self;
+    Stream *self;
     PyObject *result, *data, *py_errorno;
     ASSERT(handle);
 
-    self = (IOStream *)handle->data;
+    self = (Stream *)handle->data;
     ASSERT(self);
     /* Object could go out of scope in the callback, increase refcount to avoid it */
     Py_INCREF(self);
@@ -131,7 +91,7 @@ on_iostream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
     } else if (nread < 0) {
         data = Py_None;
         Py_INCREF(Py_None);
-        err = uv_last_error(UV_LOOP(self));
+        err = uv_last_error(UV_HANDLE_LOOP(self));
         py_errorno = PyInt_FromLong((long)err.code);
     }
 
@@ -157,7 +117,7 @@ on_iostream_write(uv_write_t* req, int status)
     int i;
     iostream_req_data_t* req_data;
     iostream_write_data_t* write_data;
-    IOStream *self;
+    Stream *self;
     PyObject *callback, *result, *py_errorno;
     uv_err_t err;
 
@@ -165,7 +125,7 @@ on_iostream_write(uv_write_t* req, int status)
 
     req_data = (iostream_req_data_t *)req->data;
     write_data = (iostream_write_data_t *)req_data->data;
-    self = (IOStream *)req_data->obj;
+    self = (Stream *)req_data->obj;
     callback = req_data->callback;
 
     ASSERT(self);
@@ -174,7 +134,7 @@ on_iostream_write(uv_write_t* req, int status)
 
     if (callback != Py_None) {
         if (status < 0) {
-            err = uv_last_error(UV_LOOP(self));
+            err = uv_last_error(UV_HANDLE_LOOP(self));
             py_errorno = PyInt_FromLong((long)err.code);
         } else {
             py_errorno = Py_None;
@@ -203,47 +163,15 @@ on_iostream_write(uv_write_t* req, int status)
 
 
 static PyObject *
-IOStream_func_close(IOStream *self, PyObject *args)
-{
-    PyObject *callback = Py_None;
-
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is already closed");
-        return NULL;
-    }
-
-    if (!PyArg_ParseTuple(args, "|O:close", &callback)) {
-        return NULL;
-    }
-
-    if (callback != Py_None && !PyCallable_Check(callback)) {
-        PyErr_SetString(PyExc_TypeError, "a callable or None is required");
-        return NULL;
-    }
-
-    Py_INCREF(callback);
-    self->on_close_cb = callback;
-
-    /* Increase refcount so that object is not removed before the callback is called */
-    Py_INCREF(self);
-
-    uv_close((uv_handle_t *)self->uv_handle, on_iostream_close);
-    self->uv_handle = NULL;
-
-    Py_RETURN_NONE;
-}
-
-
-static PyObject *
-IOStream_func_shutdown(IOStream *self, PyObject *args)
+Stream_func_shutdown(Stream *self, PyObject *args)
 {
     int r;
     uv_shutdown_t *req = NULL;
     iostream_req_data_t *req_data = NULL;
     PyObject *callback = Py_None;
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is already closed");
+    if (!UV_HANDLE(self)) {
+        PyErr_SetString(PyExc_StreamError, "Stream is already closed");
         return NULL;
     }
 
@@ -268,9 +196,9 @@ IOStream_func_shutdown(IOStream *self, PyObject *args)
     req_data->callback = callback;
     req->data = (void *)req_data;
 
-    r = uv_shutdown(req, self->uv_handle, on_iostream_shutdown);
+    r = uv_shutdown(req, (uv_stream_t *)UV_HANDLE(self), on_iostream_shutdown);
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_IOStreamError);
+        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
 
@@ -289,15 +217,15 @@ error:
 
 
 static PyObject *
-IOStream_func_start_read(IOStream *self, PyObject *args)
+Stream_func_start_read(Stream *self, PyObject *args)
 {
     int r;
     PyObject *tmp, *callback;
 
     tmp = NULL;
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is closed");
+    if (!UV_HANDLE(self)) {
+        PyErr_SetString(PyExc_StreamError, "Stream is closed");
         return NULL;
     }
 
@@ -310,9 +238,9 @@ IOStream_func_start_read(IOStream *self, PyObject *args)
         return NULL;
     }
 
-    r = uv_read_start((uv_stream_t *)self->uv_handle, (uv_alloc_cb)on_iostream_alloc, (uv_read_cb)on_iostream_read);
+    r = uv_read_start((uv_stream_t *)UV_HANDLE(self), (uv_alloc_cb)on_iostream_alloc, (uv_read_cb)on_iostream_read);
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_IOStreamError);
+        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
         return NULL;
     }
 
@@ -326,27 +254,30 @@ IOStream_func_start_read(IOStream *self, PyObject *args)
 
 
 static PyObject *
-IOStream_func_stop_read(IOStream *self)
+Stream_func_stop_read(Stream *self)
 {
     int r;
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is closed");
+    if (!UV_HANDLE(self)) {
+        PyErr_SetString(PyExc_StreamError, "Stream is closed");
         return NULL;
     }
 
-    r = uv_read_stop(self->uv_handle);
+    r = uv_read_stop((uv_stream_t *)UV_HANDLE(self));
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_IOStreamError);
+        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
         return NULL;
     }
+
+    Py_XDECREF(self->on_read_cb);
+    self->on_read_cb = NULL;
 
     Py_RETURN_NONE;
 }
 
 
 static PyObject *
-IOStream_func_write(IOStream *self, PyObject *args)
+Stream_func_write(Stream *self, PyObject *args)
 {
     int i, r, buf_count;
     char *data_str, *tmp;
@@ -362,8 +293,8 @@ IOStream_func_write(IOStream *self, PyObject *args)
     buf_count = 0;
     callback = Py_None;
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is closed");
+    if (!UV_HANDLE(self)) {
+        PyErr_SetString(PyExc_StreamError, "Stream is closed");
         return NULL;
     }
 
@@ -422,9 +353,9 @@ IOStream_func_write(IOStream *self, PyObject *args)
     write_data->buf_count = buf_count;
     req_data->data = (void *)write_data;
 
-    r = uv_write(wr, self->uv_handle, bufs, buf_count, on_iostream_write);
+    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_iostream_write);
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_IOStreamError);
+        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
 
@@ -473,7 +404,7 @@ iter_guess_size(PyObject *o, Py_ssize_t defaultvalue)
 }
 
 static PyObject *
-IOStream_func_writelines(IOStream *self, PyObject *args)
+Stream_func_writelines(Stream *self, PyObject *args)
 {
     int i, r, buf_count;
     char *data_str, *tmp;
@@ -492,8 +423,8 @@ IOStream_func_writelines(IOStream *self, PyObject *args)
     callback = Py_None;
     default_encoding = PyUnicode_GetDefaultEncoding();
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_IOStreamError, "IOStream is closed");
+    if (!UV_HANDLE(self)) {
+        PyErr_SetString(PyExc_StreamError, "Stream is closed");
         return NULL;
     }
 
@@ -628,9 +559,9 @@ IOStream_func_writelines(IOStream *self, PyObject *args)
     write_data->buf_count = buf_count;
     req_data->data = (void *)write_data;
 
-    r = uv_write(wr, self->uv_handle, bufs, buf_count, on_iostream_write);
+    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_iostream_write);
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_IOStreamError);
+        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
 
@@ -658,107 +589,82 @@ error:
 
 
 static PyObject *
-IOStream_readable_get(IOStream *self, void *closure)
+Stream_readable_get(Stream *self, void *closure)
 {
     UNUSED_ARG(closure);
-    if (!self->uv_handle) {
+    if (!UV_HANDLE(self)) {
         Py_RETURN_FALSE;
     } else {
-        return PyBool_FromLong((long)uv_is_readable(self->uv_handle));
+        return PyBool_FromLong((long)uv_is_readable((uv_stream_t *)UV_HANDLE(self)));
     }
 }
 
 
 static PyObject *
-IOStream_writable_get(IOStream *self, void *closure)
+Stream_writable_get(Stream *self, void *closure)
 {
     UNUSED_ARG(closure);
-    if (!self->uv_handle) {
+    if (!UV_HANDLE(self)) {
         Py_RETURN_FALSE;
     } else {
-        return PyBool_FromLong((long)uv_is_writable(self->uv_handle));
+        return PyBool_FromLong((long)uv_is_writable((uv_stream_t *)UV_HANDLE(self)));
     }
 }
 
 
 static PyObject *
-IOStream_tp_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+Stream_tp_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
-    IOStream *self = (IOStream *)PyType_GenericNew(type, args, kwargs);
+    Stream *self = (Stream *)HandleType.tp_new(type, args, kwargs);
     if (!self) {
         return NULL;
     }
-    self->uv_handle = NULL;
     return (PyObject *)self;
 }
 
 
 static int
-IOStream_tp_traverse(IOStream *self, visitproc visit, void *arg)
+Stream_tp_traverse(Stream *self, visitproc visit, void *arg)
 {
-    Py_VISIT(self->data);
     Py_VISIT(self->on_read_cb);
-    Py_VISIT(self->on_close_cb);
-    Py_VISIT(self->loop);
+    HandleType.tp_traverse((PyObject *)self, visit, arg);
     return 0;
 }
 
 
 static int
-IOStream_tp_clear(IOStream *self)
+Stream_tp_clear(Stream *self)
 {
-    Py_CLEAR(self->data);
     Py_CLEAR(self->on_read_cb);
-    Py_CLEAR(self->on_close_cb);
-    Py_CLEAR(self->loop);
+    HandleType.tp_clear((PyObject *)self);
     return 0;
 }
 
 
-static void
-IOStream_tp_dealloc(IOStream *self)
-{
-    if (self->uv_handle) {
-        uv_close((uv_handle_t *)self->uv_handle, on_iostream_dealloc_close);
-        self->uv_handle = NULL;
-    }
-    Py_TYPE(self)->tp_clear((PyObject *)self);
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-
 static PyMethodDef
-IOStream_tp_methods[] = {
-    { "shutdown", (PyCFunction)IOStream_func_shutdown, METH_VARARGS, "Shutdown the write side of this IOStream." },
-    { "close", (PyCFunction)IOStream_func_close, METH_VARARGS, "Close this IOStream connection." },
-    { "write", (PyCFunction)IOStream_func_write, METH_VARARGS, "Write data on the stream." },
-    { "writelines", (PyCFunction)IOStream_func_writelines, METH_VARARGS, "Write a sequence of data on the stream." },
-    { "start_read", (PyCFunction)IOStream_func_start_read, METH_VARARGS, "Start read data from the connected endpoint." },
-    { "stop_read", (PyCFunction)IOStream_func_stop_read, METH_NOARGS, "Stop read data from the connected endpoint." },
+Stream_tp_methods[] = {
+    { "shutdown", (PyCFunction)Stream_func_shutdown, METH_VARARGS, "Shutdown the write side of this Stream." },
+    { "write", (PyCFunction)Stream_func_write, METH_VARARGS, "Write data on the stream." },
+    { "writelines", (PyCFunction)Stream_func_writelines, METH_VARARGS, "Write a sequence of data on the stream." },
+    { "start_read", (PyCFunction)Stream_func_start_read, METH_VARARGS, "Start read data from the connected endpoint." },
+    { "stop_read", (PyCFunction)Stream_func_stop_read, METH_NOARGS, "Stop read data from the connected endpoint." },
     { NULL }
 };
 
 
-static PyMemberDef IOStream_tp_members[] = {
-    {"loop", T_OBJECT_EX, offsetof(IOStream, loop), READONLY, "Loop where this IOStream is running on."},
-    {"data", T_OBJECT, offsetof(IOStream, data), 0, "Arbitrary data."},
+static PyGetSetDef Stream_tp_getsets[] = {
+    {"readable", (getter)Stream_readable_get, 0, "Indicates if stream is readable.", NULL},
+    {"writable", (getter)Stream_writable_get, 0, "Indicates if stream is writable.", NULL},
     {NULL}
 };
 
 
-static PyGetSetDef IOStream_tp_getsets[] = {
-    {"readable", (getter)IOStream_readable_get, 0, "Indicates if stream is readable.", NULL},
-    {"writable", (getter)IOStream_writable_get, 0, "Indicates if stream is writable.", NULL},
-    {NULL}
-};
-
-
-static PyTypeObject IOStreamType = {
+static PyTypeObject StreamType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    "pyuv.IOStream",                                               /*tp_name*/
-    sizeof(IOStream),                                              /*tp_basicsize*/
+    "pyuv.Stream",                                                 /*tp_name*/
+    sizeof(Stream),                                                /*tp_basicsize*/
     0,                                                             /*tp_itemsize*/
-    (destructor)IOStream_tp_dealloc,                               /*tp_dealloc*/
+    0,                                                             /*tp_dealloc*/
     0,                                                             /*tp_print*/
     0,                                                             /*tp_getattr*/
     0,                                                             /*tp_setattr*/
@@ -775,15 +681,15 @@ static PyTypeObject IOStreamType = {
     0,                                                             /*tp_as_buffer*/
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,                       /*tp_flags*/
     0,                                                             /*tp_doc*/
-    (traverseproc)IOStream_tp_traverse,                            /*tp_traverse*/
-    (inquiry)IOStream_tp_clear,                                    /*tp_clear*/
+    (traverseproc)Stream_tp_traverse,                              /*tp_traverse*/
+    (inquiry)Stream_tp_clear,                                      /*tp_clear*/
     0,                                                             /*tp_richcompare*/
     0,                                                             /*tp_weaklistoffset*/
     0,                                                             /*tp_iter*/
     0,                                                             /*tp_iternext*/
-    IOStream_tp_methods,                                           /*tp_methods*/
-    IOStream_tp_members,                                           /*tp_members*/
-    IOStream_tp_getsets,                                           /*tp_getsets*/
+    Stream_tp_methods,                                             /*tp_methods*/
+    0,                                                             /*tp_members*/
+    Stream_tp_getsets,                                             /*tp_getsets*/
     0,                                                             /*tp_base*/
     0,                                                             /*tp_dict*/
     0,                                                             /*tp_descr_get*/
@@ -791,6 +697,6 @@ static PyTypeObject IOStreamType = {
     0,                                                             /*tp_dictoffset*/
     0,                                                             /*tp_init*/
     0,                                                             /*tp_alloc*/
-    IOStream_tp_new,                                               /*tp_new*/
+    Stream_tp_new,                                                 /*tp_new*/
 };
 

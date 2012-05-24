@@ -89,8 +89,21 @@
 
         :py:class:`Loop` object where this handle runs.
 
-    .. py:attribute:: data
+    .. py:attribute:: readable
 
-        Any Python object attached to this handle.
+        *Read only*
 
+        Indicates if this handle is readable.
+
+    .. py:attribute:: writable
+
+        *Read only*
+
+        Indicates if this handle is writable.
+
+    .. py:attribute:: active
+
+        *Read only*
+
+        Indicates if this handle is active.
 

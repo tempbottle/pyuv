@@ -1,10 +1,8 @@
 
 #include "pyuv.h"
 
-#include "errno.c"
-#include "helper.c"
-
 #include "loop.c"
+#include "handle.c"
 #include "async.c"
 #include "timer.c"
 #include "prepare.c"
@@ -16,12 +14,13 @@
 #include "tcp.c"
 #include "tty.c"
 #include "udp.c"
+#include "poll.c"
 #include "dns.c"
 #include "fs.c"
 #include "threadpool.c"
 #include "process.c"
 #include "util.c"
-
+#include "errno.c"
 #include "error.c"
 
 #define LIBUV_VERSION UV_VERSION_MAJOR.UV_VERSION_MINOR-LIBUV_REVISION
@@ -35,6 +34,54 @@ static PyModuleDef pyuv_module = {
     NULL,                   /*m_methods*/
 };
 #endif
+
+/* borrowed from pyev */
+#ifdef PYUV_WINDOWS
+static int
+pyuv_setmaxstdio(void)
+{
+    if (_setmaxstdio(PYUV_MAXSTDIO) != PYUV_MAXSTDIO) {
+        if (errno) {
+            PyErr_SetFromErrno(PyExc_WindowsError);
+        }
+        else {
+            PyErr_SetString(PyExc_WindowsError, "_setmaxstdio failed");
+        }
+        return -1;
+    }
+    return 0;
+}
+
+static int
+pyuv_import_socket(void)
+{
+    void *api;
+
+#if PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION < 7
+    PyObject *_socket, *_socket_CAPI;
+    _socket = PyImport_ImportModule("_socket");
+    if (!_socket) {
+        return -1;
+    }
+    _socket_CAPI = PyObject_GetAttrString(_socket, "CAPI");
+    if (!_socket_CAPI) {
+        Py_DECREF(_socket);
+        return -1;
+    }
+    api = PyCObject_AsVoidPtr(_socket_CAPI);
+    Py_DECREF(_socket_CAPI);
+    Py_DECREF(_socket);
+#else
+    api = PyCapsule_Import("_socket.CAPI", 0);
+#endif
+    if (!api) {
+        return -1;
+    }
+    memcpy(&PySocketModule, api, sizeof(PySocketModule));
+    return 0;
+}
+#endif
+
 
 /* Module */
 PyObject*
@@ -50,6 +97,12 @@ init_pyuv(void)
 
     /* Initialize GIL */
     PyEval_InitThreads();
+
+#ifdef PYUV_WINDOWS
+    if (pyuv_setmaxstdio() || pyuv_import_socket()) {
+        return NULL;
+    }
+#endif
 
     /* Main module */
 #ifdef PYUV_PYTHON3
@@ -94,9 +147,20 @@ init_pyuv(void)
     PyUVModule_AddObject(pyuv, "util", util);
 
     /* Types */
-    TCPType.tp_base = &IOStreamType;
-    PipeType.tp_base = &IOStreamType;
-    TTYType.tp_base = &IOStreamType;
+    AsyncType.tp_base = &HandleType;
+    TimerType.tp_base = &HandleType;
+    PrepareType.tp_base = &HandleType;
+    IdleType.tp_base = &HandleType;
+    CheckType.tp_base = &HandleType;
+    SignalType.tp_base = &HandleType;
+    UDPType.tp_base = &HandleType;
+    PollType.tp_base = &HandleType;
+    ProcessType.tp_base = &HandleType;
+
+    StreamType.tp_base = &HandleType;
+    TCPType.tp_base = &StreamType;
+    PipeType.tp_base = &StreamType;
+    TTYType.tp_base = &StreamType;
 
     PyUVModule_AddType(pyuv, "Loop", &LoopType);
     PyUVModule_AddType(pyuv, "Async", &AsyncType);
@@ -109,28 +173,42 @@ init_pyuv(void)
     PyUVModule_AddType(pyuv, "Pipe", &PipeType);
     PyUVModule_AddType(pyuv, "TTY", &TTYType);
     PyUVModule_AddType(pyuv, "UDP", &UDPType);
-    PyUVModule_AddType(pyuv, "ThreadPool", &ThreadPoolType);
+    PyUVModule_AddType(pyuv, "Poll", &PollType);
     PyUVModule_AddType(pyuv, "Process", &ProcessType);
+    PyUVModule_AddType(pyuv, "ThreadPool", &ThreadPoolType);
+
+    /* PyStructSequence types */
+    if (LoopCountersResultType.tp_name == 0)
+        PyStructSequence_InitType(&LoopCountersResultType, &loop_counters_result_desc);
+    if (DNSHostResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSHostResultType, &dns_host_result_desc);
+    if (DNSNameinfoResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSNameinfoResultType, &dns_nameinfo_result_desc);
+    if (DNSAddrinfoResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSAddrinfoResultType, &dns_addrinfo_result_desc);
+    if (DNSQueryMXResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSQueryMXResultType, &dns_query_mx_result_desc);
+    if (DNSQuerySRVResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSQuerySRVResultType, &dns_query_srv_result_desc);
+    if (DNSQueryNAPTRResultType.tp_name == 0)
+        PyStructSequence_InitType(&DNSQueryNAPTRResultType, &dns_query_naptr_result_desc);
+    if (StatResultType.tp_name == 0)
+        PyStructSequence_InitType(&StatResultType, &stat_result_desc);
 
     /* Constants */
     PyModule_AddIntMacro(pyuv, UV_JOIN_GROUP);
     PyModule_AddIntMacro(pyuv, UV_LEAVE_GROUP);
+    PyModule_AddIntMacro(pyuv, UV_PROCESS_SETUID);
+    PyModule_AddIntMacro(pyuv, UV_PROCESS_SETGID);
+    PyModule_AddIntMacro(pyuv, UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS);
+    PyModule_AddIntMacro(pyuv, UV_READABLE);
+    PyModule_AddIntMacro(pyuv, UV_WRITABLE);
 
+    /* Handle types */
     PyModule_AddIntMacro(pyuv, UV_UNKNOWN_HANDLE);
-    PyModule_AddIntMacro(pyuv, UV_TCP);
-    PyModule_AddIntMacro(pyuv, UV_UDP);
-    PyModule_AddIntMacro(pyuv, UV_NAMED_PIPE);
-    PyModule_AddIntMacro(pyuv, UV_TTY);
-    PyModule_AddIntMacro(pyuv, UV_FILE);
-    PyModule_AddIntMacro(pyuv, UV_TIMER);
-    PyModule_AddIntMacro(pyuv, UV_PREPARE);
-    PyModule_AddIntMacro(pyuv, UV_CHECK);
-    PyModule_AddIntMacro(pyuv, UV_IDLE);
-    PyModule_AddIntMacro(pyuv, UV_ASYNC);
-    PyModule_AddIntMacro(pyuv, UV_ARES_TASK);
-    PyModule_AddIntMacro(pyuv, UV_ARES_EVENT);
-    PyModule_AddIntMacro(pyuv, UV_PROCESS);
-    PyModule_AddIntMacro(pyuv, UV_FS_EVENT);
+#define XX(uc, lc) PyModule_AddIntMacro(pyuv, UV_##uc);
+    UV_HANDLE_TYPE_MAP(XX)
+#undef XX
 
     /* Module version (the MODULE_VERSION macro is defined by setup.py) */
     PyModule_AddStringConstant(pyuv, "__version__", __MSTR(MODULE_VERSION));

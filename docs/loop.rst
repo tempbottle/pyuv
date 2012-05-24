@@ -25,20 +25,10 @@
         Run the event loop. This method will block until there is no active
         handle running on the loop.
 
-    .. py:method:: poll
+    .. py:method:: run_once
         
-        Poll the event loop for events without blocking.
-
-    .. py:method:: ref
-    .. py:method:: unref
-
-        Manually manage event loop reference count. This doesn't have anything to
-        do with Python reference counting. The ``run`` funtion will not return until
-        the loop's reference count reaches zero.
-
-        This functions may be used to prevent the loop from being alive only if
-        certain handles are active, such as :py:class:`Timer` handles. In that case
-        ``unref`` should be called after the Timer was started.
+        Run a single loop iteration. Returns true if there are any pending events to process,
+        false otherwise.
 
     .. py:method:: now
     .. py:method:: update_time
@@ -53,14 +43,16 @@
 
         This are advanced functions not be used in standard applications.
 
-    .. py:attribute:: data
+    .. py:attribute:: active_handles
 
-        Any Python object attached to this loop.
+        *Read only*
+
+        List of the currently active handles.
 
     .. py:attribute:: counters
 
         *Read only*
 
-        Dictionary containing the loop counters. Loop counters maintain a count on the
+        Named tuple containing the loop counters. Loop counters maintain a count on the
         number of different handles, requests, etc that were ever run by the loop.
 

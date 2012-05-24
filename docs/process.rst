@@ -32,6 +32,13 @@
         :param string cwd: Specifies the working directory where the child process will
             be executed.
 
+        :param int uid: UID of the user to be used if flag ``UV_PROCESS_SETUID`` is used.
+
+        :param int gid: GID of the group to be used if flag ``UV_PROCESS_SETGID`` is used.
+
+        :param int flags: Available flags: ``UV_PROCESS_SETUID``, ``UV_PROCESS_SETGID``, ``UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS``:
+            set UID, set GID and enclose arguments in double quotes on Windows, respectively.
+
         :param Pipe stdin: Uninitialized ``Pipe`` which will be used as the process stdin.
 
         :param Pipe stdout: Uninitialized ``Pipe`` which will be used as the process stdout.
@@ -64,14 +71,15 @@
 
         :py:class:`Loop` object where this handle runs.
 
-    .. py:attribute:: data
-
-        Any Python object attached to this handle.
-
     .. py:attribute:: pid
 
         *Read only*
 
         PID of the spawned process.
 
+    .. py:attribute:: active
+
+        *Read only*
+
+        Indicates if this handle is active.
 

@@ -17,6 +17,14 @@ are used throughout `puyv`.
 
     Base exception class. Parent of all other exception classes.
 
+.. py:exception:: HandleError()
+
+    Base exception class. Parent of all other handle exception classes.
+
+.. py:exception:: StreamError()
+
+    Base exception class for stream errors.
+
 .. py:exception:: AsyncError()
 
     Exception raised if an error is found when calling ``Async`` handle functions.
@@ -49,6 +57,10 @@ are used throughout `puyv`.
 
     Exception raised if an error is found when calling ``Prepare`` handle functions.
 
+.. py:exception:: PollError()
+
+    Exception raised if an error is found when calling ``Poll`` handle functions.
+
 .. py:exception:: SignalError()
 
     Exception raised if an error is found when calling ``Signal`` handle functions.
@@ -76,5 +88,4 @@ are used throughout `puyv`.
 .. py:exception:: ProcessError()
 
     Exception raised if an error is found when calling ``Process`` handle functions.
-
 

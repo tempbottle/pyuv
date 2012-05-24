@@ -18,6 +18,12 @@ TCP Echo server
 .. literalinclude:: ../examples/echo-server-tcp.py
 
 
+TCP Echo server using Poll handles
+**********************************
+
+.. literalinclude:: ../examples/echo-server-poll.py
+
+
 Standard IO Echo server using Pipe handles
 ******************************************
 
@@ -28,5 +34,4 @@ Standard IO Echo server using TTY handles
 *****************************************
 
 .. literalinclude:: ../examples/echo-tty.py
-
 

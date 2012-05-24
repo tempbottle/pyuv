@@ -2,41 +2,67 @@
 static PyObject* PyExc_ThreadPoolError;
 
 typedef struct {
-    PyObject *func;
-    PyObject *args;
-    PyObject *kwargs;
+    PyObject *work_cb;
+    PyObject *after_work_cb;
     PyObject *result;
-    PyObject *after_work_func;
+    PyObject *error;
 } tpool_req_data_t;
 
 
 static void
-work_cb(uv_work_t *req)
+threadpool_work_cb(uv_work_t *req)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     tpool_req_data_t *data;
-    PyObject *args, *kw, *result;
+    PyObject *result, *error, *err_type, *err_value, *err_tb;
+
+    err_type = err_value = err_tb = NULL;
 
     ASSERT(req);
 
     data = (tpool_req_data_t*)(req->data);
-    args = (data->args) ? data->args : PyTuple_New(0);
-    kw = data->kwargs;
 
-    result = PyObject_Call(data->func, args, kw);
+    result = PyObject_CallFunctionObjArgs(data->work_cb, NULL);
     if (result == NULL) {
-        PyErr_WriteUnraisable(data->func);
+        PyErr_Fetch(&err_type, &err_value, &err_tb);
+        PyErr_NormalizeException(&err_type, &err_value, &err_tb);
+        error = PyTuple_New(3);
+        if (!error) {
+            PyErr_WriteUnraisable(data->work_cb);
+            error = Py_None;
+            Py_INCREF(Py_None);
+        } else {
+            if (!err_type) {
+                err_type = Py_None;
+                Py_INCREF(Py_None);
+            }
+            if (!err_value) {
+                err_value = Py_None;
+                Py_INCREF(Py_None);
+            }
+            if (!err_tb) {
+                err_tb = Py_None;
+                Py_INCREF(Py_None);
+            }
+            PyTuple_SET_ITEM(error, 0, err_type);
+            PyTuple_SET_ITEM(error, 1, err_value);
+            PyTuple_SET_ITEM(error, 2, err_tb);
+        }
         result = Py_None;
+        Py_INCREF(Py_None);
+    } else {
+        error = Py_None;
         Py_INCREF(Py_None);
     }
     data->result = result;
+    data->error = error;
 
     PyGILState_Release(gstate);
 }
 
 
 static void
-after_work_cb(uv_work_t *req)
+threadpool_after_work_cb(uv_work_t *req)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     tpool_req_data_t *data;
@@ -46,19 +72,18 @@ after_work_cb(uv_work_t *req)
 
     data = (tpool_req_data_t*)req->data;
 
-    if (data->after_work_func) {
-        result = PyObject_CallFunctionObjArgs(data->after_work_func, data->result, NULL);
+    if (data->after_work_cb) {
+        result = PyObject_CallFunctionObjArgs(data->after_work_cb, data->result, data->error, NULL);
         if (result == NULL) {
-            PyErr_WriteUnraisable(data->after_work_func);
+            PyErr_WriteUnraisable(data->after_work_cb);
         }
         Py_XDECREF(result);
     }
 
-    Py_DECREF(data->func);
-    Py_XDECREF(data->args);
-    Py_XDECREF(data->kwargs);
-    Py_XDECREF(data->after_work_func);
+    Py_DECREF(data->work_cb);
+    Py_XDECREF(data->after_work_cb);
     Py_DECREF(data->result);
+    Py_DECREF(data->error);
 
     PyMem_Free(req->data);
     PyMem_Free(req);
@@ -67,40 +92,28 @@ after_work_cb(uv_work_t *req)
 
 
 static PyObject *
-ThreadPool_func_queue_work(ThreadPool *self, PyObject *args, PyObject *kwargs)
+ThreadPool_func_queue_work(ThreadPool *self, PyObject *args)
 {
     int r;
     uv_work_t *work_req = NULL;
     tpool_req_data_t *req_data = NULL;
-    PyObject *func, *func_args, *func_kwargs, *after_work_func;
-
-    static char *kwlist[] = {"func", "after_work_func", "func_args", "func_kwargs", NULL};
+    PyObject *work_cb, *after_work_cb;
 
     work_req = NULL;
     req_data = NULL;
-    func = func_args = func_kwargs = after_work_func = NULL;
+    work_cb = after_work_cb = NULL;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|OOO:queue_work", kwlist, &func, &after_work_func, &func_args, &func_kwargs)) {
+    if (!PyArg_ParseTuple(args, "O|O:queue_work", &work_cb, &after_work_cb)) {
         return NULL;
     }
 
-    if (!PyCallable_Check(func)) {
+    if (!PyCallable_Check(work_cb)) {
         PyErr_SetString(PyExc_TypeError, "a callable is required");
         return NULL;
     }
 
-    if (after_work_func != NULL && !PyCallable_Check(after_work_func)) {
-        PyErr_SetString(PyExc_TypeError, "after_work_func must be a callable");
-        return NULL;
-    }
-
-    if (func_args != NULL && !PyTuple_Check(func_args)) {
-        PyErr_SetString(PyExc_TypeError, "args must be a tuple");
-        return NULL;
-    }
-
-    if (func_kwargs != NULL && !PyDict_Check(func_kwargs)) {
-        PyErr_SetString(PyExc_TypeError, "kwargs must be a dictionary");
+    if (after_work_cb != NULL && !PyCallable_Check(after_work_cb)) {
+        PyErr_SetString(PyExc_TypeError, "after_work_cb must be a callable");
         return NULL;
     }
 
@@ -116,21 +129,18 @@ ThreadPool_func_queue_work(ThreadPool *self, PyObject *args, PyObject *kwargs)
         goto error;
     }
 
-    Py_INCREF(func);
-    Py_XINCREF(after_work_func);
-    Py_XINCREF(func_args);
-    Py_XINCREF(func_kwargs);
+    Py_INCREF(work_cb);
+    Py_XINCREF(after_work_cb);
 
-    req_data->func = func;
-    req_data->after_work_func = after_work_func;
-    req_data->args = func_args;
-    req_data->kwargs = func_kwargs;
+    req_data->work_cb = work_cb;
+    req_data->after_work_cb = after_work_cb;
     req_data->result = NULL;
+    req_data->error = NULL;
 
     work_req->data = (void *)req_data;
-    r = uv_queue_work(UV_LOOP(self), work_req, work_cb, after_work_cb);
+    r = uv_queue_work(UV_LOOP(self), work_req, threadpool_work_cb, threadpool_after_work_cb);
     if (r != 0) {
-        raise_uv_exception(self->loop, PyExc_ThreadPoolError);
+        raise_uv_exception(UV_LOOP(self), PyExc_ThreadPoolError);
         goto error;
     }
 
@@ -143,10 +153,34 @@ error:
     if (req_data) {
         PyMem_Free(req_data);
     }
-    Py_DECREF(func);
-    Py_XDECREF(func_args);
-    Py_XDECREF(func_kwargs);
+    Py_DECREF(work_cb);
+    Py_XDECREF(after_work_cb);
     return NULL;
+}
+
+
+static PyObject *
+ThreadPool_func_set_parallel_threads(PyObject *cls, PyObject *args)
+{
+    int nthreads;
+
+    UNUSED_ARG(cls);
+
+    if (!PyArg_ParseTuple(args, "i:set_parallel_threads", &nthreads)) {
+        return NULL;
+    }
+
+    if (nthreads <= 0) {
+        PyErr_SetString(PyExc_ValueError, "value must be higher than 0.");
+        return NULL;
+    }
+
+#ifndef PYUV_WINDOWS
+    eio_set_min_parallel(nthreads);
+    eio_set_max_parallel(nthreads);
+#endif
+
+    Py_RETURN_NONE;
 }
 
 
@@ -206,7 +240,8 @@ ThreadPool_tp_dealloc(ThreadPool *self)
 
 static PyMethodDef
 ThreadPool_tp_methods[] = {
-    { "queue_work", (PyCFunction)ThreadPool_func_queue_work, METH_VARARGS|METH_KEYWORDS, "Queue the given function to be run in the thread pool." },
+    { "queue_work", (PyCFunction)ThreadPool_func_queue_work, METH_VARARGS, "Queue the given function to be run in the thread pool." },
+    { "set_parallel_threads", (PyCFunction)ThreadPool_func_set_parallel_threads, METH_CLASS|METH_VARARGS, "Set the maximum number of allowed threads in the pool." },
     { NULL }
 };
 
