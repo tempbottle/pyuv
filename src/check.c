@@ -36,10 +36,7 @@ Check_func_start(Check *self, PyObject *args)
 
     tmp = NULL;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_CheckError, "Check is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O:start", &callback)) {
         return NULL;
@@ -52,7 +49,7 @@ Check_func_start(Check *self, PyObject *args)
 
     r = uv_check_start((uv_check_t *)UV_HANDLE(self), on_check_callback);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_CheckError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_CheckError);
         return NULL;
     }
 
@@ -70,14 +67,11 @@ Check_func_stop(Check *self)
 {
     int r;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_CheckError, "Check is already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     r = uv_check_stop((uv_check_t *)UV_HANDLE(self));
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_CheckError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_CheckError);
         return NULL;
     }
 
@@ -121,7 +115,7 @@ Check_tp_init(Check *self, PyObject *args, PyObject *kwargs)
 
     r = uv_check_init(UV_HANDLE_LOOP(self), uv_check);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_CheckError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_CheckError);
         Py_DECREF(loop);
         return -1;
     }

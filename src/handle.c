@@ -1,5 +1,6 @@
 
 static PyObject* PyExc_HandleError;
+static PyObject* PyExc_HandleClosedError;
 
 
 static void
@@ -21,6 +22,7 @@ on_handle_close(uv_handle_t *handle)
         Py_XDECREF(result);
     }
 
+    self->uv_handle = NULL;
     handle->data = NULL;
     PyMem_Free(handle);
 
@@ -48,6 +50,7 @@ on_handle_dealloc_close(uv_handle_t *handle)
 static PyObject *
 Handle_func_ref(Handle *self)
 {
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
     uv_ref(self->uv_handle);
     Py_RETURN_NONE;
 }
@@ -56,6 +59,7 @@ Handle_func_ref(Handle *self)
 static PyObject *
 Handle_func_unref(Handle *self)
 {
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
     uv_unref(self->uv_handle);
     Py_RETURN_NONE;
 }
@@ -66,10 +70,7 @@ Handle_func_close(Handle *self, PyObject *args)
 {
     PyObject *callback = NULL;
 
-    if (!self->uv_handle) {
-        PyErr_SetString(PyExc_HandleError, "Handle is already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "|O:close", &callback)) {
         return NULL;
@@ -87,7 +88,6 @@ Handle_func_close(Handle *self, PyObject *args)
     Py_INCREF(self);
 
     uv_close(self->uv_handle, on_handle_close);
-    self->uv_handle = NULL;
 
     Py_RETURN_NONE;
 }
@@ -101,6 +101,18 @@ Handle_active_get(Handle *self, void *closure)
         Py_RETURN_FALSE;
     } else {
         return PyBool_FromLong((long)uv_is_active(self->uv_handle));
+    }
+}
+
+
+static PyObject *
+Handle_closed_get(Handle *self, void *closure)
+{
+    UNUSED_ARG(closure);
+    if (!self->uv_handle) {
+        Py_RETURN_TRUE;
+    } else {
+        return PyBool_FromLong((long)uv_is_closing(self->uv_handle));
     }
 }
 
@@ -142,8 +154,8 @@ static void
 Handle_tp_dealloc(Handle *self)
 {
     if (self->uv_handle) {
+        self->uv_handle->data = NULL;
         uv_close(self->uv_handle, on_handle_dealloc_close);
-        self->uv_handle = NULL;
     }
     if (self->weakreflist != NULL) {
         PyObject_ClearWeakRefs((PyObject *)self);
@@ -210,6 +222,7 @@ static PyMemberDef Handle_tp_members[] = {
 static PyGetSetDef Handle_tp_getsets[] = {
     {"__dict__", (getter)Handle_dict_get, (setter)Handle_dict_set, NULL},
     {"active", (getter)Handle_active_get, NULL, "Indicates if this handle is active.", NULL},
+    {"closed", (getter)Handle_closed_get, NULL, "Indicates if this handle is closing or already closed.", NULL},
     {NULL}
 };
 

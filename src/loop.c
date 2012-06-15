@@ -116,6 +116,45 @@ Loop_func_update_time(Loop *self)
 }
 
 
+static void
+walk_cb(uv_handle_t* handle, void* arg)
+{
+    PyObject *callback = (PyObject *)arg;
+    PyObject *result, *obj;
+    if (handle->data != NULL) {
+        obj = (PyObject *)handle->data;
+        Py_INCREF(obj);
+        result = PyObject_CallFunctionObjArgs(callback, obj, NULL);
+        if (result == NULL) {
+            PyErr_WriteUnraisable(callback);
+        }
+        Py_DECREF(obj);
+        Py_XDECREF(result);
+    }
+}
+
+static PyObject *
+Loop_func_walk(Loop *self, PyObject *args)
+{
+    PyObject *callback;
+
+    if (!PyArg_ParseTuple(args, "O:walk", &callback)) {
+        return NULL;
+    }
+
+    if (!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "a callable is required");
+        return NULL;
+    }
+
+    Py_INCREF(callback);
+    uv_walk(self->uv_loop, (uv_walk_cb)walk_cb, (void*)callback);
+    Py_DECREF(callback);
+
+    Py_RETURN_NONE;
+}
+
+
 static PyObject *
 Loop_func_default_loop(PyObject *cls)
 {
@@ -127,32 +166,8 @@ Loop_func_default_loop(PyObject *cls)
 static PyObject *
 Loop_active_handles_get(Loop *self, void *closure)
 {
-    ngx_queue_t *q;
-    uv_handle_t *handle;
-    PyObject *list, *item;
-
     UNUSED_ARG(closure);
-
-    list = PyList_New(0);
-    if (!list) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-#ifdef UV_LEAN_AND_MEAN
-    return list;
-#else
-    ngx_queue_foreach(q, &self->uv_loop->active_handles) {
-        handle = ngx_queue_data(q, uv_handle_t, active_queue);
-        if (handle->data) {
-            item = (PyObject *)handle->data;
-            ASSERT(item);
-            if (PyList_Append(list, item))
-                continue;
-            /* No need to Py_DECREF here, we need the item to be referenced only once, and PyList_Append does that */
-        }
-    }
-    return list;
-#endif
+    return PyInt_FromLong((long)self->uv_loop->active_handles);
 }
 
 
@@ -302,6 +317,7 @@ Loop_tp_methods[] = {
     { "run_once", (PyCFunction)Loop_func_run_once, METH_NOARGS, "Run a single event loop iteration, waiting for events if necessary." },
     { "now", (PyCFunction)Loop_func_now, METH_NOARGS, "Return event loop time, expressed in nanoseconds." },
     { "update_time", (PyCFunction)Loop_func_update_time, METH_NOARGS, "Update event loop's notion of time by querying the kernel." },
+    { "walk", (PyCFunction)Loop_func_walk, METH_VARARGS, "Walk all handles in the loop." },
     { "default_loop", (PyCFunction)Loop_func_default_loop, METH_CLASS|METH_NOARGS, "Instantiate the default loop." },
     { NULL }
 };
@@ -309,7 +325,7 @@ Loop_tp_methods[] = {
 
 static PyGetSetDef Loop_tp_getsets[] = {
     {"__dict__", (getter)Loop_dict_get, (setter)Loop_dict_set, NULL},
-    {"active_handles", (getter)Loop_active_handles_get, NULL, "List of active handles in this loop", NULL},
+    {"active_handles", (getter)Loop_active_handles_get, NULL, "Number of active handles in this loop", NULL},
     {"default", (getter)Loop_default_get, NULL, "Is this the default loop?", NULL},
     {"counters", (getter)Loop_counters_get, NULL, "Loop counters", NULL},
     {NULL}

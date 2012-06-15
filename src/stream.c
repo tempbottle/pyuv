@@ -3,19 +3,19 @@ static PyObject* PyExc_StreamError;
 
 
 typedef struct {
-    PyObject *obj;
-    PyObject *callback;
-    void *data;
-} iostream_req_data_t;
-
-typedef struct {
     uv_buf_t *bufs;
     int buf_count;
-} iostream_write_data_t;
+    Py_buffer view;
+} stream_write_data_t;
+
+typedef struct {
+    PyObject *callback;
+    stream_write_data_t *data;
+} stream_req_data_t;
 
 
 static uv_buf_t
-on_iostream_alloc(uv_stream_t* handle, size_t suggested_size)
+on_stream_alloc(uv_stream_t* handle, size_t suggested_size)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     uv_buf_t buf = uv_buf_init(PyMem_Malloc(suggested_size), suggested_size);
@@ -25,20 +25,17 @@ on_iostream_alloc(uv_stream_t* handle, size_t suggested_size)
 }
 
 
-/*
- * Called when all pending write requests have been sent, write direction has been closed.
- */
 static void
-on_iostream_shutdown(uv_shutdown_t* req, int status)
+on_stream_shutdown(uv_shutdown_t* req, int status)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
-    iostream_req_data_t* req_data;
+    stream_req_data_t* req_data;
     uv_err_t err;
     Stream *self;
     PyObject *callback, *result, *py_errorno;
 
-    req_data = (iostream_req_data_t *)req->data;
-    self = (Stream *)req_data->obj;
+    req_data = (stream_req_data_t *)req->data;
+    self = (Stream *)req->handle->data;
     callback = req_data->callback;
 
     ASSERT(self);
@@ -71,7 +68,7 @@ on_iostream_shutdown(uv_shutdown_t* req, int status)
 
 
 static void
-on_iostream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
+on_stream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     uv_err_t err;
@@ -103,7 +100,10 @@ on_iostream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
     Py_DECREF(data);
     Py_DECREF(py_errorno);
 
-    PyMem_Free(buf.base);
+    /* In case of error libuv may not call alloc_cb */
+    if (buf.base != NULL) {
+        PyMem_Free(buf.base);
+    }
 
     Py_DECREF(self);
     PyGILState_Release(gstate);
@@ -111,21 +111,21 @@ on_iostream_read(uv_stream_t* handle, int nread, uv_buf_t buf)
 
 
 static void
-on_iostream_write(uv_write_t* req, int status)
+on_stream_write(uv_write_t* req, int status)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
     int i;
-    iostream_req_data_t* req_data;
-    iostream_write_data_t* write_data;
+    stream_req_data_t* req_data;
+    stream_write_data_t* write_data;
     Stream *self;
     PyObject *callback, *result, *py_errorno;
     uv_err_t err;
 
     ASSERT(req);
 
-    req_data = (iostream_req_data_t *)req->data;
-    write_data = (iostream_write_data_t *)req_data->data;
-    self = (Stream *)req_data->obj;
+    req_data = (stream_req_data_t *)req->data;
+    write_data = req_data->data;
+    self = (Stream *)req->handle->data;
     callback = req_data->callback;
 
     ASSERT(self);
@@ -148,8 +148,12 @@ on_iostream_write(uv_write_t* req, int status)
         Py_DECREF(py_errorno);
     }
 
-    for (i = 0; i < write_data->buf_count; i++) {
-        PyMem_Free(write_data->bufs[i].base);
+    if (write_data->buf_count == 1) {
+        PyBuffer_Release(&write_data->view);
+    } else {
+        for (i = 0; i < write_data->buf_count; i++) {
+            PyMem_Free(write_data->bufs[i].base);
+        }
     }
     PyMem_Free(write_data->bufs);
     PyMem_Free(write_data);
@@ -167,13 +171,10 @@ Stream_func_shutdown(Stream *self, PyObject *args)
 {
     int r;
     uv_shutdown_t *req = NULL;
-    iostream_req_data_t *req_data = NULL;
+    stream_req_data_t *req_data = NULL;
     PyObject *callback = Py_None;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_StreamError, "Stream is already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "|O:shutdown", &callback)) {
         return NULL;
@@ -185,20 +186,19 @@ Stream_func_shutdown(Stream *self, PyObject *args)
         goto error;
     }
 
-    req_data = (iostream_req_data_t*) PyMem_Malloc(sizeof(iostream_req_data_t));
+    req_data = (stream_req_data_t*) PyMem_Malloc(sizeof(stream_req_data_t));
     if (!req_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    req_data->obj = (PyObject *)self;
     Py_INCREF(callback);
     req_data->callback = callback;
     req->data = (void *)req_data;
 
-    r = uv_shutdown(req, (uv_stream_t *)UV_HANDLE(self), on_iostream_shutdown);
+    r = uv_shutdown(req, (uv_stream_t *)UV_HANDLE(self), on_stream_shutdown);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
 
@@ -224,10 +224,7 @@ Stream_func_start_read(Stream *self, PyObject *args)
 
     tmp = NULL;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_StreamError, "Stream is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O:start_read", &callback)) {
         return NULL;
@@ -238,9 +235,9 @@ Stream_func_start_read(Stream *self, PyObject *args)
         return NULL;
     }
 
-    r = uv_read_start((uv_stream_t *)UV_HANDLE(self), (uv_alloc_cb)on_iostream_alloc, (uv_read_cb)on_iostream_read);
+    r = uv_read_start((uv_stream_t *)UV_HANDLE(self), (uv_alloc_cb)on_stream_alloc, (uv_read_cb)on_stream_read);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_StreamError);
         return NULL;
     }
 
@@ -258,14 +255,11 @@ Stream_func_stop_read(Stream *self)
 {
     int r;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_StreamError, "Stream is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     r = uv_read_stop((uv_stream_t *)UV_HANDLE(self));
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_StreamError);
         return NULL;
     }
 
@@ -279,24 +273,18 @@ Stream_func_stop_read(Stream *self)
 static PyObject *
 Stream_func_write(Stream *self, PyObject *args)
 {
-    int i, r, buf_count;
-    char *data_str, *tmp;
+    int r, buf_count;
     Py_buffer pbuf;
-    Py_ssize_t data_len;
     PyObject *callback;
-    uv_buf_t tmpbuf;
     uv_buf_t *bufs = NULL;
     uv_write_t *wr = NULL;
-    iostream_req_data_t *req_data = NULL;
-    iostream_write_data_t *write_data = NULL;
+    stream_req_data_t *req_data = NULL;
+    stream_write_data_t *write_data = NULL;
 
     buf_count = 0;
     callback = Py_None;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_StreamError, "Stream is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "s*|O:write", &pbuf, &callback)) {
         return NULL;
@@ -314,19 +302,18 @@ Stream_func_write(Stream *self, PyObject *args)
         goto error;
     }
 
-    req_data = (iostream_req_data_t*) PyMem_Malloc(sizeof(iostream_req_data_t));
+    req_data = (stream_req_data_t*) PyMem_Malloc(sizeof(stream_req_data_t));
     if (!req_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    write_data = (iostream_write_data_t *) PyMem_Malloc(sizeof(iostream_write_data_t));
+    write_data = (stream_write_data_t *) PyMem_Malloc(sizeof(stream_write_data_t));
     if (!write_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    req_data->obj = (PyObject *)self;
     Py_INCREF(callback);
     req_data->callback = callback;
     wr->data = (void *)req_data;
@@ -337,38 +324,25 @@ Stream_func_write(Stream *self, PyObject *args)
         goto error;
     }
 
-    data_str = pbuf.buf;
-    data_len = pbuf.len;
-    tmp = (char *) PyMem_Malloc(data_len);
-    if (!tmp) {
-        PyErr_NoMemory();
-        goto error;
-    }
-    memcpy(tmp, data_str, data_len);
-    tmpbuf = uv_buf_init(tmp, data_len);
-    bufs[0] = tmpbuf;
+    bufs[0] = uv_buf_init(pbuf.buf, pbuf.len);
     buf_count = 1;
 
     write_data->bufs = bufs;
     write_data->buf_count = buf_count;
-    req_data->data = (void *)write_data;
+    write_data->view = pbuf;
+    req_data->data = write_data;
 
-    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_iostream_write);
+    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_stream_write);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
-
-    PyBuffer_Release(&pbuf);
 
     Py_RETURN_NONE;
 
 error:
     PyBuffer_Release(&pbuf);
     if (bufs) {
-        for (i = 0; i < buf_count; i++) {
-            PyMem_Free(bufs[i].base);
-        }
         PyMem_Free(bufs);
     }
     if (write_data) {
@@ -415,18 +389,15 @@ Stream_func_writelines(Stream *self, PyObject *args)
     uv_buf_t tmpbuf;
     uv_buf_t *bufs, *new_bufs;
     uv_write_t *wr = NULL;
-    iostream_req_data_t *req_data = NULL;
-    iostream_write_data_t *write_data = NULL;
+    stream_req_data_t *req_data = NULL;
+    stream_write_data_t *write_data = NULL;
 
     buf_count = 0;
     bufs = new_bufs = NULL;
     callback = Py_None;
     default_encoding = PyUnicode_GetDefaultEncoding();
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_StreamError, "Stream is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O|O:writelines", &seq, &callback)) {
         return NULL;
@@ -443,19 +414,18 @@ Stream_func_writelines(Stream *self, PyObject *args)
         goto error;
     }
 
-    req_data = (iostream_req_data_t*) PyMem_Malloc(sizeof(iostream_req_data_t));
+    req_data = (stream_req_data_t*) PyMem_Malloc(sizeof(stream_req_data_t));
     if (!req_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    write_data = (iostream_write_data_t *) PyMem_Malloc(sizeof(iostream_write_data_t));
+    write_data = (stream_write_data_t *) PyMem_Malloc(sizeof(stream_write_data_t));
     if (!write_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    req_data->obj = (PyObject *)self;
     Py_INCREF(callback);
     req_data->callback = callback;
     wr->data = (void *)req_data;
@@ -557,11 +527,11 @@ Stream_func_writelines(Stream *self, PyObject *args)
 
     write_data->bufs = bufs;
     write_data->buf_count = buf_count;
-    req_data->data = (void *)write_data;
+    req_data->data = write_data;
 
-    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_iostream_write);
+    r = uv_write(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, on_stream_write);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_StreamError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_StreamError);
         goto error;
     }
 

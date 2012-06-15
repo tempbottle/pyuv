@@ -7,10 +7,7 @@ TTY_func_set_mode(TTY *self, PyObject *args)
 {
     int r, mode;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_TTYError, "already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "i:set_mode", &mode)) {
         return NULL;
@@ -18,7 +15,7 @@ TTY_func_set_mode(TTY *self, PyObject *args)
 
     r = uv_tty_set_mode((uv_tty_t *)UV_HANDLE(self), mode);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_TTYError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_TTYError);
         return NULL;
     }
 
@@ -59,14 +56,11 @@ TTY_func_get_winsize(TTY *self)
 {
     int r, width, height;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_TTYError, "already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     r = uv_tty_get_winsize((uv_tty_t *)UV_HANDLE(self), &width, &height);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_TTYError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_TTYError);
         return NULL;
     }
 
@@ -112,7 +106,7 @@ TTY_tp_init(TTY *self, PyObject *args, PyObject *kwargs)
 
     r = uv_tty_init(UV_HANDLE_LOOP(self), uv_tty, fd, (fd == 0)?1:0);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_TTYError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_TTYError);
         Py_DECREF(loop);
         return -1;
     }

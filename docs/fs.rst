@@ -14,6 +14,11 @@
     synchronous and asyncronous modes. If you want to run it synchronous don't
     pass any callable as the `callback` argument, else it will run asynchronously.
 
+.. note::
+    All functions that take a file descriptor argument must get the file descriptor
+    resulting of a pyuv.fs.open call on Windows, else the operation will fail. This
+    limitation doesn't apply to Unix systems.
+
 
 .. py:function:: pyuv.fs.stat(loop, path, [callback])
 
@@ -127,13 +132,17 @@
     Callback signature: ``callback(loop, path, errorno)``
 
 
-.. py:function:: pyuv.fs.symlink(loop, path, new_path, [callback])
+.. py:function:: pyuv.fs.symlink(loop, path, new_path, flags, [callback])
 
     :param string path: Original file.
 
     :param string new_path: Name for the symlink.
 
     :param loop: loop object where this function runs.
+
+    :param int flags: flags to be used on Windows platform. If ``UV_FS_SYMLINK_DIR`` is specified the symlink
+        will be created to a directory. If ``UV_FS_SYMLINK_JUNCTION`` a junction point will be created instead
+        of a symlink.
 
     :param callable callback: Function that will be called with the result of the function.
 
@@ -385,6 +394,12 @@
         *Read only*
 
         Indicates if this handle is active.
+
+    .. py:attribute:: closed
+
+        *Read only*
+
+        Indicates if this handle is closing or already closed.
 
 
 Module constants

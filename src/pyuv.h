@@ -2,6 +2,7 @@
 #define PYUV_H
 
 /* python */
+#define PY_SSIZE_T_CLEAN
 #include "Python.h"
 #include "structmember.h"
 #include "structseq.h"
@@ -45,7 +46,6 @@ typedef int Bool;
 
 #define UNUSED_ARG(arg)  (void)arg
 
-
 #if defined(__MINGW32__) || defined(_MSC_VER)
     #define PYUV_WINDOWS
 #endif
@@ -64,12 +64,30 @@ typedef int Bool;
     } while(0)                                                              \
 
 #define UV_LOOP(x) (x)->loop->uv_loop
+
 #define UV_HANDLE(x) ((Handle *)x)->uv_handle
+
+#define UV_HANDLE_CLOSED(x) (!UV_HANDLE(x) || uv_is_closing(UV_HANDLE(x)))
+
 #define UV_HANDLE_LOOP(x) UV_LOOP((Handle *)x)
 
-#if defined(__MINGW32__) || defined(_MSC_VER)
-    #define PYUV_WINDOWS
-#endif
+#define RAISE_IF_HANDLE_CLOSED(obj, exc_type, retval)                       \
+    do {                                                                    \
+        if (UV_HANDLE_CLOSED(obj)) {                                        \
+            PyErr_SetString(exc_type, "");                                  \
+            return retval;                                                  \
+        }                                                                   \
+    } while(0)                                                              \
+
+#define RAISE_UV_EXCEPTION(loop, exc_type)                                          \
+    do {                                                                            \
+        uv_err_t err = uv_last_error(loop);                                         \
+        PyObject *exc_data = Py_BuildValue("(is)", err.code, uv_strerror(err));     \
+        if (exc_data != NULL) {                                                     \
+            PyErr_SetObject(exc_type, exc_data);                                    \
+            Py_DECREF(exc_data);                                                    \
+        }                                                                           \
+    } while(0)                                                                      \
 
 
 /* Python types definitions */
@@ -193,11 +211,18 @@ static PyTypeObject PollType;
 
 /* Process */
 typedef struct {
+    PyObject_HEAD
+    PyObject *stream;
+    int fd;
+    int flags;
+} StdIO;
+
+static PyTypeObject StdIOType;
+
+typedef struct {
     Handle handle;
     PyObject *on_exit_cb;
-    PyObject *stdin_pipe;
-    PyObject *stdout_pipe;
-    PyObject *stderr_pipe;
+    PyObject *stdio;
 } Process;
 
 static PyTypeObject ProcessType;
@@ -277,43 +302,9 @@ PyUVModule_AddObject(PyObject *module, const char *name, PyObject *value)
 }
 
 
-#if defined(__GNUC__) && !defined(__STRICT_ANSI__)
-    #define INLINE inline
-#else
-    #define INLINE
-#endif
-
-/* Raise appropriate exception when an error is produced inside libuv */
-static INLINE void
-raise_uv_exception(uv_loop_t *loop, PyObject *exc_type)
-{
-    uv_err_t err = uv_last_error(loop);
-    PyObject *exc_data = Py_BuildValue("(is)", err.code, uv_strerror(err));
-    if (exc_data != NULL) {
-        PyErr_SetObject(exc_type, exc_data);
-        Py_DECREF(exc_data);
-    }
-}
-
 /* borrowed from pyev */
 #ifdef PYUV_WINDOWS
-/* avoid including socketmodule.h (not available anyway) */
-typedef struct {
-    PyTypeObject *Sock_Type;
-    PyObject *error;
-#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 2
-    PyObject *timeout_error;
-#endif
-} PySocketModule_APIObject;
-
-static PySocketModule_APIObject PySocketModule;
-
-#define PYUV_MAXSTDIO 2048
-
-/* Convert a Windows handle into a usable file descriptor */
-#define PYUV_WIN32_HANDLE_TO_FD(handle) _open_osfhandle (handle, 0)
-#define PYUV_FD_TO_WIN32_HANDLE(fd) _get_osfhandle (fd)
-
+    #define PYUV_MAXSTDIO 2048
 #endif
 
 #endif

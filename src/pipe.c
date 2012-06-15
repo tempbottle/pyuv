@@ -39,13 +39,13 @@ static void
 on_pipe_client_connection(uv_connect_t *req, int status)
 {
     PyGILState_STATE gstate = PyGILState_Ensure();
-    iostream_req_data_t* req_data;
+    stream_req_data_t* req_data;
     Pipe *self;
     PyObject *callback, *result, *py_errorno;
     ASSERT(req);
 
-    req_data = (iostream_req_data_t *)req->data;
-    self = (Pipe *)req_data->obj;
+    req_data = (stream_req_data_t *)req->data;
+    self = (Pipe *)req->handle->data;
     callback = req_data->callback;
 
     ASSERT(self);
@@ -112,7 +112,10 @@ on_pipe_read2(uv_pipe_t* handle, int nread, uv_buf_t buf, uv_handle_type pending
     Py_DECREF(py_pending);
     Py_DECREF(py_errorno);
 
-    PyMem_Free(buf.base);
+    /* In case of error libuv may not call alloc_cb */
+    if (buf.base != NULL) {
+        PyMem_Free(buf.base);
+    }
 
     Py_DECREF(self);
     PyGILState_Release(gstate);
@@ -125,10 +128,7 @@ Pipe_func_bind(Pipe *self, PyObject *args)
     int r;
     char *name;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "s:bind", &name)) {
         return NULL;
@@ -136,7 +136,7 @@ Pipe_func_bind(Pipe *self, PyObject *args)
 
     r = uv_pipe_bind((uv_pipe_t *)UV_HANDLE(self), name);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         return NULL;
     }
 
@@ -153,10 +153,7 @@ Pipe_func_listen(Pipe *self, PyObject *args)
     backlog = 128;
     tmp = NULL;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O|i:listen", &callback, &backlog)) {
         return NULL;
@@ -174,7 +171,7 @@ Pipe_func_listen(Pipe *self, PyObject *args)
 
     r = uv_listen((uv_stream_t *)UV_HANDLE(self), backlog, on_pipe_connection);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         return NULL;
     }
 
@@ -193,10 +190,7 @@ Pipe_func_accept(Pipe *self, PyObject *args)
     int r;
     PyObject *client;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "already closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O:accept", &client)) {
         return NULL;
@@ -209,7 +203,7 @@ Pipe_func_accept(Pipe *self, PyObject *args)
 
     r = uv_accept((uv_stream_t *)UV_HANDLE(self), (uv_stream_t *)UV_HANDLE(client));
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         return NULL;
     }
 
@@ -222,13 +216,10 @@ Pipe_func_connect(Pipe *self, PyObject *args)
 {
     char *name;
     uv_connect_t *connect_req = NULL;
-    iostream_req_data_t *req_data = NULL;
+    stream_req_data_t *req_data = NULL;
     PyObject *callback;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "sO:connect", &name, &callback)) {
         return NULL;
@@ -245,13 +236,12 @@ Pipe_func_connect(Pipe *self, PyObject *args)
         goto error;
     }
 
-    req_data = (iostream_req_data_t*) PyMem_Malloc(sizeof(iostream_req_data_t));
+    req_data = (stream_req_data_t*) PyMem_Malloc(sizeof(stream_req_data_t));
     if (!req_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    req_data->obj = (PyObject *)self;
     Py_INCREF(callback);
     req_data->callback = callback;
     connect_req->data = (void *)req_data;
@@ -277,10 +267,7 @@ Pipe_func_open(Pipe *self, PyObject *args)
 {
     int fd;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "i:open", &fd)) {
         return NULL;
@@ -298,10 +285,7 @@ Pipe_func_pending_instances(Pipe *self, PyObject *args)
     /* This function applies to Windows only */
     int count;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "i:pending_instances", &count)) {
         return NULL;
@@ -321,10 +305,7 @@ Pipe_func_start_read2(Pipe *self, PyObject *args)
 
     tmp = NULL;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "Pipe is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "O:start_read2", &callback)) {
         return NULL;
@@ -335,9 +316,9 @@ Pipe_func_start_read2(Pipe *self, PyObject *args)
         return NULL;
     }
 
-    r = uv_read2_start((uv_stream_t *)UV_HANDLE(self), (uv_alloc_cb)on_iostream_alloc, (uv_read2_cb)on_pipe_read2);
+    r = uv_read2_start((uv_stream_t *)UV_HANDLE(self), (uv_alloc_cb)on_stream_alloc, (uv_read2_cb)on_pipe_read2);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         return NULL;
     }
 
@@ -354,23 +335,17 @@ static PyObject *
 Pipe_func_write2(Pipe *self, PyObject *args)
 {
     int i, r, buf_count;
-    char *data_str, *tmp;
     Py_buffer pbuf;
-    Py_ssize_t data_len;
     PyObject *callback, *send_handle;
-    uv_buf_t tmpbuf;
     uv_buf_t *bufs = NULL;
     uv_write_t *wr = NULL;
-    iostream_req_data_t *req_data = NULL;
-    iostream_write_data_t *write_data = NULL;
+    stream_req_data_t *req_data = NULL;
+    stream_write_data_t *write_data = NULL;
 
     buf_count = 0;
     callback = Py_None;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_PipeError, "Pipe is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     if (!PyArg_ParseTuple(args, "s*O|O:write2", &pbuf, &send_handle, &callback)) {
         return NULL;
@@ -393,19 +368,18 @@ Pipe_func_write2(Pipe *self, PyObject *args)
         goto error;
     }
 
-    req_data = (iostream_req_data_t*) PyMem_Malloc(sizeof(iostream_req_data_t));
+    req_data = (stream_req_data_t*) PyMem_Malloc(sizeof(stream_req_data_t));
     if (!req_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    write_data = (iostream_write_data_t *) PyMem_Malloc(sizeof(iostream_write_data_t));
+    write_data = (stream_write_data_t *) PyMem_Malloc(sizeof(stream_write_data_t));
     if (!write_data) {
         PyErr_NoMemory();
         goto error;
     }
 
-    req_data->obj = (PyObject *)self;
     Py_INCREF(callback);
     req_data->callback = callback;
     wr->data = (void *)req_data;
@@ -416,29 +390,19 @@ Pipe_func_write2(Pipe *self, PyObject *args)
         goto error;
     }
 
-    data_str = pbuf.buf;
-    data_len = pbuf.len;
-    tmp = (char *) PyMem_Malloc(data_len);
-    if (!tmp) {
-        PyErr_NoMemory();
-        goto error;
-    }
-    memcpy(tmp, data_str, data_len);
-    tmpbuf = uv_buf_init(tmp, data_len);
-    bufs[0] = tmpbuf;
+    bufs[0] = uv_buf_init(pbuf.buf, pbuf.len);
     buf_count = 1;
 
     write_data->bufs = bufs;
     write_data->buf_count = buf_count;
-    req_data->data = (void *)write_data;
+    write_data->view = pbuf;
+    req_data->data = write_data;
 
-    r = uv_write2(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, (uv_stream_t *)UV_HANDLE(send_handle), on_iostream_write);
+    r = uv_write2(wr, (uv_stream_t *)UV_HANDLE(self), bufs, buf_count, (uv_stream_t *)UV_HANDLE(send_handle), on_stream_write);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         goto error;
     }
-
-    PyBuffer_Release(&pbuf);
 
     Py_RETURN_NONE;
 
@@ -498,7 +462,7 @@ Pipe_tp_init(Pipe *self, PyObject *args, PyObject *kwargs)
 
     r = uv_pipe_init(UV_HANDLE_LOOP(self), uv_pipe, (ipc == Py_True) ? 1 : 0);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_PipeError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_PipeError);
         Py_DECREF(loop);
         return -1;
     }

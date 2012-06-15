@@ -51,35 +51,6 @@ pyuv_setmaxstdio(void)
     }
     return 0;
 }
-
-static int
-pyuv_import_socket(void)
-{
-    void *api;
-
-#if PY_MAJOR_VERSION == 2 && PY_MINOR_VERSION < 7
-    PyObject *_socket, *_socket_CAPI;
-    _socket = PyImport_ImportModule("_socket");
-    if (!_socket) {
-        return -1;
-    }
-    _socket_CAPI = PyObject_GetAttrString(_socket, "CAPI");
-    if (!_socket_CAPI) {
-        Py_DECREF(_socket);
-        return -1;
-    }
-    api = PyCObject_AsVoidPtr(_socket_CAPI);
-    Py_DECREF(_socket_CAPI);
-    Py_DECREF(_socket);
-#else
-    api = PyCapsule_Import("_socket.CAPI", 0);
-#endif
-    if (!api) {
-        return -1;
-    }
-    memcpy(&PySocketModule, api, sizeof(PySocketModule));
-    return 0;
-}
 #endif
 
 
@@ -99,7 +70,7 @@ init_pyuv(void)
     PyEval_InitThreads();
 
 #ifdef PYUV_WINDOWS
-    if (pyuv_setmaxstdio() || pyuv_import_socket()) {
+    if (pyuv_setmaxstdio()) {
         return NULL;
     }
 #endif
@@ -174,6 +145,7 @@ init_pyuv(void)
     PyUVModule_AddType(pyuv, "TTY", &TTYType);
     PyUVModule_AddType(pyuv, "UDP", &UDPType);
     PyUVModule_AddType(pyuv, "Poll", &PollType);
+    PyUVModule_AddType(pyuv, "StdIO", &StdIOType);
     PyUVModule_AddType(pyuv, "Process", &ProcessType);
     PyUVModule_AddType(pyuv, "ThreadPool", &ThreadPoolType);
 
@@ -195,12 +167,21 @@ init_pyuv(void)
     if (StatResultType.tp_name == 0)
         PyStructSequence_InitType(&StatResultType, &stat_result_desc);
 
-    /* Constants */
+    /* UDP constants */
     PyModule_AddIntMacro(pyuv, UV_JOIN_GROUP);
     PyModule_AddIntMacro(pyuv, UV_LEAVE_GROUP);
+    /* Process constants */
     PyModule_AddIntMacro(pyuv, UV_PROCESS_SETUID);
     PyModule_AddIntMacro(pyuv, UV_PROCESS_SETGID);
     PyModule_AddIntMacro(pyuv, UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS);
+    PyModule_AddIntMacro(pyuv, UV_PROCESS_DETACHED);
+    PyModule_AddIntMacro(pyuv, UV_IGNORE);
+    PyModule_AddIntMacro(pyuv, UV_CREATE_PIPE);
+    PyModule_AddIntMacro(pyuv, UV_READABLE_PIPE);
+    PyModule_AddIntMacro(pyuv, UV_WRITABLE_PIPE);
+    PyModule_AddIntMacro(pyuv, UV_INHERIT_FD);
+    PyModule_AddIntMacro(pyuv, UV_INHERIT_STREAM);
+    /* Poll constants */
     PyModule_AddIntMacro(pyuv, UV_READABLE);
     PyModule_AddIntMacro(pyuv, UV_WRITABLE);
 

@@ -22,8 +22,7 @@
 
         :param int port: Port number to bind to.
 
-        Bind to the specified IP address and port. The ``TCP`` handle is acting as a server
-        in this case.
+        Bind to the specified IP address and port.
 
     .. py:method:: listen(callback, [backlog])
 
@@ -168,4 +167,11 @@
         *Read only*
 
         Indicates if this handle is active.
+
+    .. py:attribute:: closed
+
+        *Read only*
+
+        Indicates if this handle is closing or already closed.
+
 

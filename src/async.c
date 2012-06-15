@@ -33,14 +33,11 @@ Async_func_send(Async *self)
 {
     int r;
 
-    if (!UV_HANDLE(self)) {
-        PyErr_SetString(PyExc_AsyncError, "async is closed");
-        return NULL;
-    }
+    RAISE_IF_HANDLE_CLOSED(self, PyExc_HandleClosedError, NULL);
 
     r = uv_async_send((uv_async_t *)UV_HANDLE(self));
     if (r != 0) {
-        raise_uv_exception(UV_LOOP((Handle *)self), PyExc_AsyncError);
+        RAISE_UV_EXCEPTION(UV_LOOP((Handle *)self), PyExc_AsyncError);
         return NULL;
     }
 
@@ -87,7 +84,7 @@ Async_tp_init(Async *self, PyObject *args, PyObject *kwargs)
 
     r = uv_async_init(UV_HANDLE_LOOP(self), uv_async, on_async_callback);
     if (r != 0) {
-        raise_uv_exception(UV_HANDLE_LOOP(self), PyExc_AsyncError);
+        RAISE_UV_EXCEPTION(UV_HANDLE_LOOP(self), PyExc_AsyncError);
         Py_DECREF(loop);
         return -1;
     }
