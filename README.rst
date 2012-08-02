@@ -59,7 +59,7 @@ Microsoft Windows:
 
 ::
 
-    1. for MinGW: (MinGW and MSYS need to be installed)  ./build_inplace
+    1. for MinGW: (MinGW and MSYS need to be installed)  ./build_inplace --compiler=mingw32
     2. for Visual Studio: python setup.py buld install
 
 

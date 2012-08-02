@@ -57,6 +57,17 @@ typedef int Bool;
 #define __func__ __FUNCTION__
 #endif 
 
+#define ASSERT(x)                                                           \
+    do {                                                                    \
+        if (!(x)) {                                                         \
+            fprintf (stderr, "%s:%u: %s: Assertion `" #x "' failed.\n",     \
+                     __FILE__, __LINE__, __func__);                     \
+            abort();                                                        \
+        }                                                                   \
+    } while(0)                                                              \
+
+#define UV_LOOP(x) (x)->loop->uv_loop
+
 #define UV_HANDLE(x) ((Handle *)x)->uv_handle
 
 #define UV_HANDLE_CLOSED(x) (!UV_HANDLE(x) || uv_is_closing(UV_HANDLE(x)))

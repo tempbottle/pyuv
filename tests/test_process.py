@@ -102,7 +102,7 @@ class ProcessTest(unittest2.TestCase):
         stdio.append(pyuv.StdIO(stream=stdout_pipe, flags=pyuv.UV_CREATE_PIPE|pyuv.UV_WRITABLE_PIPE))
         proc = pyuv.Process(loop)
         if sys.platform == 'win32':
-            proc.spawn(file="cmd.exe", args=[b"/c", b"proc_args_stdout.py", b"TEST"], exit_callback=proc_exit_cb, stdio=stdio)
+            proc.spawn(file="python.exe", args=[b"proc_args_stdout.py", b"TEST"], exit_callback=proc_exit_cb, stdout=stdout_pipe)
         else:
             proc.spawn(file="./proc_args_stdout.py", args=[b"TEST"], exit_callback=proc_exit_cb, stdio=stdio)
         stdout_pipe.start_read(stdout_read_cb)
