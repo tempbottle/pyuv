@@ -60,7 +60,7 @@ Microsoft Windows:
 ::
 
     1. for MinGW: (MinGW and MSYS need to be installed)  ./build_inplace --compiler=mingw32
-    2. for Visual Studio: python setup.py buld install
+    2. for Visual Studio: python setup.py build install
 
 
 Running the test suite
