@@ -46,9 +46,6 @@ typedef int Bool;
 
 #define UNUSED_ARG(arg)  (void)arg
 
-
-#define UV_LOOP(x) x->loop->uv_loop
-
 #if defined(__MINGW32__) || defined(_MSC_VER)
     #define PYUV_WINDOWS
 #endif

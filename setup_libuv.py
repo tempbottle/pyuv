@@ -51,7 +51,7 @@ class libuv_build_ext(build_ext):
     libuv_repo     = 'https://github.com/joyent/libuv.git'
     libuv_branch   = 'master'
     libuv_revision = '8f66bfc'
-    libuv_patches  = []
+    libuv_patches  = ['patches/common.gypi.patch']
 
     user_options = build_ext.user_options
     user_options.extend([
