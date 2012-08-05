@@ -381,11 +381,10 @@ Util_func_getaddrinfo(PyObject *obj, PyObject *args, PyObject *kwargs)
     uv_getaddrinfo_t* req = NULL;
     Loop *loop;
     PyObject *callback;
-
-    UNUSED_ARG(obj);
-
+   
     static char *kwlist[] = {"loop", "callback", "name", "port", "family", "socktype", "protocol", "flags", NULL};
-
+    
+    UNUSED_ARG(obj);
     port = socktype = protocol = flags = 0;
     family = AF_UNSPEC;
 
